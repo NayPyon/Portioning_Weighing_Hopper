@@ -5,25 +5,24 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
-// Definisi Pin
-#define PIN_POT       A0
-#define PIN_TARE      2
-#define PIN_START     3
-#define PIN_HX_DT     4
-#define PIN_HX_SCK    5
-#define PIN_LED_GRN   6
-#define PIN_LED_RED   7
-#define PIN_BUZZER    8
-#define PIN_SERVO     9
+// --- PIN HARDWARE ---
+#define PIN_POT       A0  // Potensiometer target berat
+#define PIN_TARE      2   // Tombol tare / nol
+#define PIN_START     3   // Tombol start / stop
+#define PIN_HX_DT     4   // Data HX711
+#define PIN_HX_SCK    5   // Clock HX711
+#define PIN_LED_GRN   6   // LED hijau (ready / selesai)
+#define PIN_LED_RED   7   // LED merah (jalan / overload)
+#define PIN_BUZZER    8   // Buzzer
+#define PIN_SERVO     9   // Servo katup hopper
 
-// Konstanta Katup Servo (Derajat)
-const int VALVE_CLOSE = 0;
-const int VALVE_SLOW  = 25;
-const int VALVE_FAST  = 90;
+// --- KONSTANTA KALIBRASI & KATUP ---
+const int VALVE_CLOSE      = 0;
+const int VALVE_SLOW       = 25;
+const int VALVE_FAST       = 90;
+const float LOADCELL_SCALE = 420.0; // Faktor kalibrasi ke kg
 
-// Kalibrasi HX711 agar output langsung dalam satuan kg
-const float LOADCELL_SCALE = 420.0;
-
+// --- OBJEK & VARIABEL GLOBAL ---
 HX711 scale;
 Servo hopperGate;
 Adafruit_SSD1306 display(128, 64, &Wire, -1);
@@ -31,23 +30,23 @@ Adafruit_SSD1306 display(128, 64, &Wire, -1);
 enum SystemState { IDLE, FAST_FILL, SLOW_FILL, DONE, OVERLOAD };
 SystemState state = IDLE;
 
-bool isRunning = false;
+bool isRunning        = false;
 float currentWeightKg = 0.0;
 float targetWeightKg  = 0.50;
-int valveAngle = VALVE_CLOSE;
+int valveAngle        = VALVE_CLOSE;
 
 unsigned long lastReadTime = 0;
-unsigned long lastBtnTime = 0;
+unsigned long lastBtnTime  = 0;
 
 void beep(int freq, int duration) {
   tone(PIN_BUZZER, freq, duration);
 }
 
+// --- TAMPILAN OLED ---
 void updateDisplay() {
   display.clearDisplay();
   display.setTextColor(SSD1306_WHITE);
 
-  // Header & Status
   display.setTextSize(1);
   display.setCursor(0, 0);
   display.print(F("HOPPER:"));
@@ -61,26 +60,23 @@ void updateDisplay() {
   }
   display.drawLine(0, 10, 128, 10, SSD1306_WHITE);
 
-  // Target (bersih tanpa ambang tambahan)
   display.setCursor(0, 14);
   display.print(F("Target : "));
   display.print(targetWeightKg, 2);
   display.println(F(" kg"));
 
-  // Berat Aktual
   display.setCursor(0, 25);
   display.print(F("Aktual : "));
   display.print(currentWeightKg, 2);
   display.println(F(" kg"));
 
-  // Bukaan Katup
   int valvePct = map(valveAngle, 0, 90, 0, 100);
   display.setCursor(0, 36);
   display.print(F("Katup  : "));
   display.print(valvePct);
   display.println(F(" %"));
 
-  // Progress Bar Pengisian
+  // Progress bar
   display.drawRect(0, 49, 128, 13, SSD1306_WHITE);
   float ratio = constrain(currentWeightKg / max(targetWeightKg, 0.01f), 0.0, 1.0);
   int barWidth = (int)(ratio * 124);
@@ -89,6 +85,7 @@ void updateDisplay() {
   display.display();
 }
 
+// --- INISIALISASI SISTEM ---
 void setup() {
   Serial.begin(115200);
 
@@ -112,10 +109,11 @@ void setup() {
   updateDisplay();
 }
 
+// --- PROGRAM UTAMA ---
 void loop() {
   unsigned long now = millis();
 
-  // 1. Pembacaan Tombol dengan Debounce 200ms
+  // Cek tombol (debounce 200ms)
   if (now - lastBtnTime > 200) {
     if (digitalRead(PIN_TARE) == LOW && !isRunning) {
       scale.tare();
@@ -139,24 +137,23 @@ void loop() {
     }
   }
 
-  // 2. Pembacaan Sensor & State Machine (Setiap 100ms)
+  // Update sensor & kontrol tiap 100ms
   if (now - lastReadTime >= 100) {
     lastReadTime = now;
 
-    // Potensiometer mengatur target 0.20 kg s.d. 2.00 kg (kelipatan 0.05 kg)
+    // Set target 0.20 - 2.00 kg (kelipatan 0.05)
     int adcVal = analogRead(PIN_POT);
     if (!isRunning) {
       int steps = map(adcVal, 0, 1023, 4, 40);
       targetWeightKg = steps * 0.05;
     }
 
-    // Baca Berat dari HX711
     if (scale.is_ready()) {
       currentWeightKg = scale.get_units(1);
       if (currentWeightKg < 0.0 && currentWeightKg > -0.01) currentWeightKg = 0.0;
     }
 
-    // State Machine Kontrol Katup & Indikator
+    // Kontrol bukaan katup
     if (isRunning) {
       if (currentWeightKg < targetWeightKg * 0.80) {
         state = FAST_FILL;
@@ -180,7 +177,6 @@ void loop() {
     }
 
     hopperGate.write(valveAngle);
-
     digitalWrite(PIN_LED_GRN, (state == DONE || state == IDLE) ? HIGH : LOW);
     digitalWrite(PIN_LED_RED, (state == FAST_FILL || state == SLOW_FILL || state == OVERLOAD) ? HIGH : LOW);
 
